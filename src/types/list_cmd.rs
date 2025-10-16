@@ -168,10 +168,8 @@ where
         Some(value) if value.is_empty() => Ok(None),
         Some(value) => match httpdate::parse_http_date(&value) {
             Ok(system_time) => Ok(Some(DateTime::<Utc>::from(system_time))),
-            Err(_) => Err(serde::de::Error::invalid_value(
-                serde::de::Unexpected::Str(&value),
-                &"a valid HTTP date",
-            )),
+            // Return None for invalid dates instead of error
+            Err(_) => Ok(None),
         },
     }
 }
@@ -536,6 +534,66 @@ mod tests {
             assert!(folder.address_book)
         } else {
             panic!("not folder")
+        }
+    }
+
+    #[test]
+    fn parse_invalid_date_0001() {
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+        <D:multistatus xmlns:D="DAV:">
+            <D:response>
+                <D:href>/remote.php/dav/files/admin</D:href>
+                <D:propstat>
+                    <D:status>HTTP/1.1 200 OK</D:status>
+                    <D:prop>
+                        <D:getlastmodified>Mon, 01 Jan 0001 00:00:00 GMT</D:getlastmodified>
+                        <D:resourcetype>
+                            <D:collection/>
+                        </D:resourcetype>
+                        <D:getetag>"5cafae80b1e3e"</D:getetag>
+                    </D:prop>
+                </D:propstat>
+            </D:response>
+        </D:multistatus>"#;
+
+        let parsed: ListMultiStatus = serde_xml_rs::from_str(xml).unwrap();
+        assert_eq!(parsed.responses.len(), 1);
+        let response = parsed.responses[0].clone();
+        // Should parse successfully with None for last_modified
+        assert_eq!(response.prop_stat.get(0).unwrap().prop.last_modified, None);
+    }
+
+    #[test]
+    fn parse_invalid_date_0001_for_folder() {
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+        <D:multistatus xmlns:D="DAV:">
+            <D:response>
+                <D:href>/remote.php/dav/files/admin</D:href>
+                <D:propstat>
+                    <D:status>HTTP/1.1 200 OK</D:status>
+                    <D:prop>
+                        <D:getlastmodified>Mon, 01 Jan 0001 00:00:00 GMT</D:getlastmodified>
+                        <D:resourcetype>
+                            <D:collection/>
+                        </D:resourcetype>
+                        <D:getetag>"5cafae80b1e3e"</D:getetag>
+                    </D:prop>
+                </D:propstat>
+            </D:response>
+        </D:multistatus>"#;
+
+        let parsed: ListMultiStatus = serde_xml_rs::from_str(xml).unwrap();
+        assert_eq!(parsed.responses.len(), 1);
+        let response = parsed.responses[0].clone();
+        let list_entity = ListEntity::try_from(response).unwrap();
+        match list_entity {
+            ListEntity::Folder(folder) => {
+                assert_eq!(folder.href, "/remote.php/dav/files/admin");
+                // When last_modified is None, folder should get default date (1970-01-01)
+                assert_eq!(folder.last_modified.timestamp(), 0);
+                assert_eq!(folder.tag, Some("\"5cafae80b1e3e\"".to_string()));
+            }
+            _ => panic!("expected folder"),
         }
     }
 
