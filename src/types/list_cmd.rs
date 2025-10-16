@@ -168,7 +168,8 @@ where
         Some(value) if value.is_empty() => Ok(None),
         Some(value) => match httpdate::parse_http_date(&value) {
             Ok(system_time) => Ok(Some(DateTime::<Utc>::from(system_time))),
-            // Return None for invalid dates instead of error
+            // Return None for invalid dates (e.g., "Mon, 01 Jan 0001 00:00:00 GMT")
+            // to gracefully handle malformed WebDAV responses instead of failing
             Err(_) => Ok(None),
         },
     }
@@ -560,7 +561,15 @@ mod tests {
         assert_eq!(parsed.responses.len(), 1);
         let response = parsed.responses[0].clone();
         // Should parse successfully with None for last_modified
-        assert_eq!(response.prop_stat.get(0).unwrap().prop.last_modified, None);
+        assert_eq!(
+            response
+                .prop_stat
+                .get(0)
+                .expect("should have at least one prop_stat")
+                .prop
+                .last_modified,
+            None
+        );
     }
 
     #[test]
